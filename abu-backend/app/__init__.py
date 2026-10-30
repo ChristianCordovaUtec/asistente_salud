@@ -19,8 +19,17 @@ def create_app():
     # Inicializar SQLAlchemy
     db.init_app(app)
 
-    # Registrar rutas
+    # Registrar blueprints de rutas
     from app.routes.health import health_bp
+    from app.routes.pacientes import pacientes_bp
+    from app.routes.responsables import responsables_bp
+    from app.routes.perfiles_corporales import perfiles_bp
+    from app.routes.condiciones import condiciones_bp
+
     app.register_blueprint(health_bp)
+    app.register_blueprint(pacientes_bp)
+    app.register_blueprint(responsables_bp)
+    app.register_blueprint(perfiles_bp)
+    app.register_blueprint(condiciones_bp)
 
     return app
