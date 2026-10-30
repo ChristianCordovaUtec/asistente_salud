@@ -1,0 +1,1 @@
+# configuración y conexión a la BBDD.
