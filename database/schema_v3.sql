@@ -1,3 +1,4 @@
+-- https://www.drawdb.app/editor/diagrams/88070bca-17ea-427d-8fa5-3d38cc74cec7
  -- =========================================================
 -- ABU - schema_v3.sql
 -- Version 3: lecturas de glucosa, alertas + notificaciones y toma de medicamentos
