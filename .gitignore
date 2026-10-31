@@ -1,0 +1,17 @@
+# === Python / Backend ===
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# === React / Frontend (Node.js) ===
+node_modules/
+build/
+dist/
+.npm
+
+# === Variables de entorno (Backend y Frontend) ===
+.env
+
+# === Editores y Sistema ===
+.vscode/
