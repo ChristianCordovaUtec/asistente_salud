@@ -2,6 +2,7 @@
 
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
+from flask_cors import CORS
 
 from app.config import Config
 
@@ -12,6 +13,12 @@ db = SQLAlchemy()
 # Construye la aplicación Flask y la configura con SQLAlchemy.
 def create_app():
     app = Flask(__name__)
+
+    CORS(app, resources={
+        r"/api/*": {
+            "origins": ["http://localhost:5173"]
+        }
+    })
 
     # Cargar configuración
     app.config.from_object(Config)
@@ -32,6 +39,7 @@ def create_app():
     from app.routes.tratamientos_medicacion import tratamientos_bp
     from app.routes.horarios_medicacion import horarios_bp
     from app.routes.ejecuciones_recordatorio import ejecuciones_recordatorio_bp
+    from app.routes.ocr import ocr_bp
 
     app.register_blueprint(health_bp)
     app.register_blueprint(pacientes_bp)
@@ -45,5 +53,6 @@ def create_app():
     app.register_blueprint(tratamientos_bp)
     app.register_blueprint(horarios_bp)
     app.register_blueprint(ejecuciones_recordatorio_bp)
+    app.register_blueprint(ocr_bp)
 
     return app
