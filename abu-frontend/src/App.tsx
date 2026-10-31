@@ -1,18 +1,23 @@
-
+/*
 import { useEffect, useRef, useState } from 'react'
+import {
+  useConversation,
+  useConversationClientTool,
+} from '@elevenlabs/react'
+
 import {
   reconocerGlucosa,
   registrarLectura,
   type ResultadoOCR,
 } from './services/ocr'
 
-// TODO: por ahora un solo paciente ya creado en BD
+const AGENT_ID = 'agent_5001m67x3cdyf9a8pcxccpy2qavp'
 const PACIENTE_ID = 'e4d7aaec-4c53-4a9c-8fba-69b687a6d248'
-
 
 function App() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const guardandoRef = useRef(false)
 
   const [camaraActiva, setCamaraActiva] = useState(false)
   const [procesando, setProcesando] = useState(false)
@@ -22,6 +27,14 @@ function App() {
   const [mensaje, setMensaje] = useState('')
   const [error, setError] = useState('')
 
+  const {
+    startSession,
+    endSession,
+    status,
+    isSpeaking,
+    isListening,
+  } = useConversation()
+
   useEffect(() => {
     if (camaraActiva && streamRef.current && videoRef.current) {
       videoRef.current.srcObject = streamRef.current
@@ -30,7 +43,7 @@ function App() {
 
   useEffect(() => {
     return () => {
-      streamRef.current?.getTracks().forEach((track) => track.stop())
+      streamRef.current?.getTracks().forEach(track => track.stop())
     }
   }, [])
 
@@ -48,13 +61,16 @@ function App() {
 
       streamRef.current = stream
       setCamaraActiva(true)
+
+      return 'Cámara activada. Indica al paciente que tome la fotografía.'
     } catch {
-      setError('No se pudo acceder a la cámara. Verifica los permisos.')
+      setError('No se pudo acceder a la cámara.')
+      return 'No se pudo activar la cámara. Informa al paciente.'
     }
   }
 
   const cerrarCamara = () => {
-    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current?.getTracks().forEach(track => track.stop())
     streamRef.current = null
     setCamaraActiva(false)
   }
@@ -72,7 +88,7 @@ function App() {
 
     context.drawImage(video, 0, 0, canvas.width, canvas.height)
 
-    const blob = await new Promise<Blob | null>((resolve) =>
+    const blob = await new Promise<Blob | null>(resolve =>
       canvas.toBlob(resolve, 'image/jpeg', 0.9)
     )
 
@@ -96,6 +112,8 @@ function App() {
 
       if (respuesta.lectura_valida && respuesta.glucosa !== null) {
         setValorConfirmado(String(respuesta.glucosa))
+      } else {
+        setError('No se pudo reconocer un valor de glucosa.')
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al procesar la imagen.')
@@ -104,16 +122,45 @@ function App() {
     }
   }
 
-  const confirmarLectura = async () => {
-    if (!resultado || resultado.glucosa === null) return
+  // Herramienta 1: activar la cámara desde Abu.
+  useConversationClientTool('iniciar_captura_glucosa', async () => {
+    return await iniciarCamara()
+  })
+
+  // Herramienta 2: entregar el resultado OCR a Abu.
+  useConversationClientTool('obtener_resultado_ocr', () => {
+    if (!resultado?.lectura_valida || resultado.glucosa === null) {
+      return {
+        lectura_valida: false,
+        mensaje: 'Todavía no existe una lectura OCR válida.',
+      }
+    }
+
+    return {
+      lectura_valida: true,
+      valor_ocr: resultado.glucosa,
+      unidad: resultado.unidad || 'mg/dL',
+      valor_actual: Number(valorConfirmado),
+    }
+  })
+
+  // Herramienta 3: guardar después de la confirmación explícita.
+  useConversationClientTool('confirmar_lectura_glucosa', async () => {
+    if (guardandoRef.current) {
+      return { exito: false, mensaje: 'El registro ya está en proceso.' }
+    }
+
+    if (!resultado?.lectura_valida || resultado.glucosa === null) {
+      return { exito: false, mensaje: 'No existe una lectura válida pendiente.' }
+    }
 
     const valor = Number(valorConfirmado)
 
     if (!Number.isFinite(valor) || valor <= 0) {
-      setError('Ingresa un valor de glucosa válido.')
-      return
+      return { exito: false, mensaje: 'El valor confirmado no es válido.' }
     }
 
+    guardandoRef.current = true
     setGuardando(true)
     setError('')
 
@@ -128,12 +175,34 @@ function App() {
       setMensaje('¡Lectura registrada correctamente!')
       setResultado(null)
       setValorConfirmado('')
+
+      return {
+        exito: true,
+        valor_guardado: valor,
+        mensaje: 'La lectura fue registrada correctamente en la base de datos.',
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo guardar la lectura.')
+      const detalle = e instanceof Error ? e.message : 'Error al guardar.'
+      setError(detalle)
+
+      return { exito: false, mensaje: detalle }
     } finally {
+      guardandoRef.current = false
       setGuardando(false)
     }
-  }
+  })
+
+  const iniciarConversacion = async () => {
+    try {
+        setError('')
+        await startSession({
+        agentId: AGENT_ID,
+        })
+    } catch (e) {
+        console.error('Error iniciando Abu:', e)
+        setError(e instanceof Error ? e.message : 'No se pudo conectar con Abu.')
+    }
+    }
 
   return (
     <main className="abu-container">
@@ -141,21 +210,31 @@ function App() {
         <div className="abu-avatar">A</div>
 
         <h1>¡Hola! Soy Abu</h1>
-
-        <p className="abu-subtitle">
-          Tu asistente personal de salud
-        </p>
+        <p className="abu-subtitle">Tu asistente personal de salud</p>
 
         <p className="abu-description">
           Estoy aquí para ayudarte a cuidar tu salud.
-          Podemos registrar tus mediciones de glucosa
-          de manera sencilla.
         </p>
 
-        {!camaraActiva && !resultado && !procesando && !mensaje && (
-          <button className="abu-button" onClick={iniciarCamara}>
-            Registrar glucosa
+        {status !== 'connected' ? (
+          <button
+            className="abu-button"
+            onClick={iniciarConversacion}
+            disabled={status === 'connecting'}
+          >
+            {status === 'connecting' ? 'Conectando...' : 'Conversar con Abu'}
           </button>
+        ) : (
+          <>
+            <p>
+              {isSpeaking ? 'Abu está hablando...' :
+                isListening ? 'Abu te está escuchando...' : 'Conversación activa'}
+            </p>
+
+            <button className="abu-secondary-button" onClick={endSession}>
+              Finalizar conversación
+            </button>
+          </>
         )}
 
         {camaraActiva && (
@@ -179,68 +258,68 @@ function App() {
 
         {procesando && (
           <p className="abu-description">
-            Estoy leyendo tu glucómetro. Un momento, por favor...
+            Leyendo el glucómetro...
           </p>
         )}
 
-        {resultado && (
+        {resultado?.lectura_valida && (
           <div className="camera-section">
-            {resultado.lectura_valida ? (
-              <>
-                <h2>Revisa tu lectura</h2>
+            <h2>Revisa tu lectura</h2>
+            <p>Abu detectó: {resultado.glucosa} {resultado.unidad}</p>
 
-                <p>Abu detectó: {resultado.glucosa} {resultado.unidad}</p>
+            <label htmlFor="valor-glucosa">Valor confirmado</label>
+            <input
+              id="valor-glucosa"
+              type="number"
+              min="0.01"
+              step="any"
+              value={valorConfirmado}
+              onChange={e => setValorConfirmado(e.target.value)}
+            />
 
-                <label htmlFor="valor-glucosa">
-                  ¿Cuál es el valor correcto?
-                </label>
-
-                <input
-                  id="valor-glucosa"
-                  type="number"
-                  min="0.01"
-                  step="any"
-                  value={valorConfirmado}
-                  onChange={(e) => setValorConfirmado(e.target.value)}
-                />
-
-                <button
-                  className="abu-button"
-                  onClick={confirmarLectura}
-                  disabled={guardando}
-                >
-                  {guardando ? 'Guardando...' : 'Confirmar lectura'}
-                </button>
-              </>
-            ) : (
-              <>
-                <h2>No pude leer el glucómetro</h2>
-                <p>Intenta tomar otra fotografía con mejor iluminación.</p>
-              </>
-            )}
-
-            <button
-              className="abu-secondary-button"
-              onClick={iniciarCamara}
-              disabled={guardando}
-            >
-              Tomar otra fotografía
-            </button>
+            <p className="abu-description">
+              Puedes corregir el valor aquí antes de confirmarlo por voz.
+            </p>
           </div>
         )}
 
-        {mensaje && (
-          <div>
-            <p>{mensaje}</p>
-            <button className="abu-button" onClick={iniciarCamara}>
-              Registrar otra lectura
-            </button>
-          </div>
+        {!camaraActiva && !resultado && !procesando && status === 'disconnected' && (
+          <button className="abu-secondary-button" onClick={iniciarCamara}>
+            Registrar glucosa sin voz
+          </button>
         )}
 
+        {guardando && <p>Guardando lectura...</p>}
+        {mensaje && <p>{mensaje}</p>}
         {error && <p className="abu-error">{error}</p>}
       </section>
     </main>
+  )
+}
+
+export default App
+*/
+
+import { useConversationControls, useConversationStatus } from '@elevenlabs/react'
+
+function App() {
+  const { startSession, endSession } = useConversationControls()
+  const { status } = useConversationStatus()
+
+  return (
+    <div>
+      <p>Estado: {status}</p>
+
+      <button onClick={() => startSession({
+        agentId: 'agent_5001m67x3cdyf9a8pcxccpy2qavp',
+      })}>
+        Conectar con Abu
+      </button>
+
+      <button onClick={() => endSession()}>
+        Desconectar
+      </button>
+    </div>
   )
 }
 
